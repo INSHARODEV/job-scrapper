@@ -1,0 +1,948 @@
+import requests
+import time
+import json
+import hashlib
+import logging
+import random
+import time
+from datetime import datetime, timedelta
+from typing import List, Dict, Set
+from dataclasses import dataclass, asdict
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import NoSuchElementException
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+@dataclass
+class Job:
+    company_name: str
+    platform: str
+    job_title: str
+    job_type: str  
+    job_link: str
+    posted_time: str
+    location: str = ""
+    description_snippet: str = ""
+    
+    def to_dict(self) -> Dict:
+        return asdict(self)
+    
+    def get_hash(self) -> str:
+        """Generate unique hash for duplicate detection"""
+        unique_string = f"{self.company_name}_{self.job_title}_{self.platform}"
+        return hashlib.md5(unique_string.encode()).hexdigest()
+
+class JobScraper:
+    def __init__(self, config_file: str = "config.json"):
+        self.config = self.load_config(config_file)
+        self.driver = None
+        self.seen_jobs: Set[str] = set()
+        self.api_url = f"https://api.airtable.com/v0/{self.config['airtable']['base_id']}/{self.config['airtable']['table_name']}"
+        self.api_key = self.config['airtable']['api_key']
+        self.api_key_2captcha = self.config.get('2captcha_api_key', '1845ec03c08162fbd7cd236c6fb3f0e4') 
+        self.filtered_companies = {
+            'large_companies': [
+                'google', 'microsoft', 'amazon', 'apple', 'meta', 'netflix', 'tesla',
+                'saudi aramco', 'sabic', 'stc', 'mobily', 'zain', 'accenture',
+                'deloitte', 'pwc', 'kpmg', 'ey', 'ibm', 'oracle', 'sap'
+            ],
+            'hr_firms': [
+                'randstad', 'manpower', 'adecco', 'hays', 'robert half',
+                'recruitment', 'talent', 'staffing', 'hr solutions', 'workforce'
+            ],
+            'government': [
+                'ministry', 'government', 'municipal', 'authority', 'commission',
+                'council', 'public sector', 'gov.sa', 'moe', 'moh', 'mci'
+            ]
+        }
+        self.target_roles = [
+            'graphic designer', 'ui/ux designer', 'full stack developer',
+            'motion graphic designer', 'frontend developer', 'backend developer',
+            'web developer', 'mobile developer', 'react developer', 'angular developer',"مصمم جرافيك"
+        ]
+   
+    def load_config(self, config_file: str) -> Dict:
+        """Load configuration from JSON file"""
+        try:
+            with open(config_file, 'r') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            logger.error(f"Config file {config_file} not found. Creating template...")
+            self.create_config_template(config_file)
+            return {}
+    
+    def create_config_template(self, config_file: str):
+        """Create a template configuration file"""
+        template = {
+            "google_sheets": {
+                "credentials_file": "credentials.json",
+                "spreadsheet_name": "Saudi Arabia Jobs",
+                "worksheet_name": "Jobs"
+            },
+            "airtable": {
+                "api_key": "patvpoYzr3vTKl9CC.6053c7a61aaf1639426cac8f5cef58a821dcd8553291e93f0a4f41698dce8fdb",
+                "base_id": "appQYuyNlVWHXyG8e",
+                "table_name": "Jobs"
+            },
+            "slack": {
+                "webhook_url": "your_slack_webhook_url"
+            },
+            "scraping": {
+                "headless": True,
+                "delay_between_requests": 2,
+                "max_pages_per_site": 5
+            }
+        }
+        with open(config_file, 'w') as f:
+            json.dump(template, f, indent=2)
+        logger.info(f"Created template config file: {config_file}")
+
+    def setup_driver(self):
+        """Setup Chrome driver with enhanced anti-detection and user agent rotation"""
+        
+        # Updated user agents with more recent versions
+        user_agents = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+        ]
+        
+        # Select random user agent
+        selected_user_agent = random.choice(user_agents)
+        logger.info(f"Using user agent: {selected_user_agent}")
+        
+        # Configure Chrome options
+        chrome_options = Options()
+        # chrome_options.add_argument('--headless') 
+        # Basic configuration
+        if self.config.get('scraping', {}).get('headless', True):
+            chrome_options.add_argument("--headless")
+            logger.info("Running in headless mode")
+        
+        # Security and performance options
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--disable-extensions")
+        chrome_options.add_argument("--disable-plugins")
+        chrome_options.add_argument("--disable-images")  # Faster loading
+        chrome_options.add_argument("--disable-javascript")  # Optional: disable JS if not needed
+        
+        # Anti-detection measures
+        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+        chrome_options.add_argument("--disable-features=VizDisplayCompositor")
+        chrome_options.add_argument("--disable-ipc-flooding-protection")
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
+        
+        # User agent and window settings
+        chrome_options.add_argument(f"--user-agent={selected_user_agent}")
+        chrome_options.add_argument("--window-size=1920,1080")
+        chrome_options.add_argument("--start-maximized")
+        
+        # Memory and performance optimizations
+        chrome_options.add_argument("--memory-pressure-off")
+        chrome_options.add_argument("--max_old_space_size=4096")
+        chrome_options.add_argument("--disable-background-timer-throttling")
+        chrome_options.add_argument("--disable-backgrounding-occluded-windows")
+        chrome_options.add_argument("--disable-renderer-backgrounding")
+        
+        # Network and cache settings
+        chrome_options.add_argument("--aggressive-cache-discard")
+        chrome_options.add_argument("--disable-background-networking")
+        
+        # Additional prefs for better performance
+        prefs = {
+            "profile.default_content_setting_values": {
+                "notifications": 2,  # Block notifications
+                "images": 2,  # Block images for faster loading
+                "plugins": 2,  # Block plugins
+                "popups": 2,  # Block popups
+                "geolocation": 2,  # Block location requests
+                "media_stream": 2,  # Block media stream requests
+            },
+            "profile.managed_default_content_settings": {
+                "images": 2
+            }
+        }
+        chrome_options.add_experimental_option("prefs", prefs)
+        
+        try:
+            # Initialize driver
+            logger.info("Initializing Chrome WebDriver...")
+            self.driver = webdriver.Chrome(options=chrome_options)
+            
+            # Set timeouts
+            self.driver.implicitly_wait(10)
+            self.driver.set_page_load_timeout(30)
+            
+            # Execute anti-detection scripts
+            self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            
+            # Additional anti-detection measures
+            self.driver.execute_script("""
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => [1, 2, 3, 4, 5]
+                });
+            """)
+            
+            self.driver.execute_script("""
+                Object.defineProperty(navigator, 'languages', {
+                    get: () => ['en-US', 'en']
+                });
+            """)
+            
+            self.driver.execute_script("""
+                const getParameter = WebGLRenderingContext.getParameter;
+                WebGLRenderingContext.prototype.getParameter = function(parameter) {
+                    if (parameter === 37445) {
+                        return 'Intel Inc.';
+                    }
+                    if (parameter === 37446) {
+                        return 'Intel Iris OpenGL Engine';
+                    }
+                    return getParameter(parameter);
+                };
+            """)
+            
+            logger.info("Chrome WebDriver initialized successfully")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize Chrome WebDriver: {e}")
+            raise
+        
+        return self.driver
+   
+    def is_company_filtered(self, company_name: str) -> bool:
+        """Check if company should be filtered out"""
+        company_lower = company_name.lower()
+        
+        for category, companies in self.filtered_companies.items():
+            for filtered_company in companies:
+                if filtered_company in company_lower:
+                    logger.info(f"Filtering out {company_name} - matches {category}")
+                    return True
+        return False
+    
+    def is_relevant_role(self, job_title: str) -> bool:
+        """Check if job title matches target roles"""
+        title_lower = job_title.lower()
+        return any(role in title_lower for role in self.target_roles)
+    
+    def determine_job_type(self, job_text: str) -> str:
+        """Determine job type based on job description/title"""
+        text_lower = job_text.lower()
+        
+        remote_keywords = ['remote', 'work from home', 'wfh', 'telecommute', 'distributed']
+        hybrid_keywords = ['hybrid', 'flexible', 'part remote', 'mixed']
+        
+        if any(keyword in text_lower for keyword in remote_keywords):
+            return "Remote"
+        elif any(keyword in text_lower for keyword in hybrid_keywords):
+            return "Hybrid"
+        else:
+            return "Offline"
+    
+    def scrape_linkedin(self) -> List[Job]:
+        """Scrape LinkedIn jobs for Saudi Arabia"""
+        logger.info("Starting LinkedIn scraping...")
+        jobs = []
+        total_cards_found = 0
+        total_jobs_processed = 0
+        
+        try:
+            # LinkedIn job search URL for Saudi Arabia
+            base_url = "https://www.linkedin.com/jobs/search/?keywords={}&location=Saudi%20Arabia&f_TPR=r86400"
+            
+            for role_index, role in enumerate(self.target_roles):
+                logger.info(f"Scraping role {role_index + 1}/{len(self.target_roles)}: '{role}'")
+                url = base_url.format(role.replace(' ', '%20'))
+                logger.info(f"Navigating to URL: {url}")
+                
+                self.driver.get(url)
+                
+                # Wait for page to load completely
+                time.sleep(5)
+                
+                # Scroll and load more jobs
+                logger.info("Scrolling to load more jobs...")
+                for scroll_attempt in range(3):
+                    logger.debug(f"Scroll attempt {scroll_attempt + 1}/3")
+                    self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                    time.sleep(3)  # Increased wait time
+                
+                # Wait for dynamic content to load
+                time.sleep(3)
+                
+                # Extract job cards
+                logger.info("Extracting job cards...")
+                job_cards = self.driver.find_elements(By.CSS_SELECTOR, ".job-search-card")
+                cards_found = len(job_cards)
+                total_cards_found += cards_found
+                logger.info(f"Found {cards_found} job cards for role '{role}'")
+                
+                if cards_found == 0:
+                    logger.warning(f"No job cards found for role '{role}'. Trying alternative selectors...")
+                    # Try alternative selectors
+                    alternative_selectors = [
+                        ".base-search-card",
+                        ".jobs-search-results__list-item",
+                        ".job-result-card",
+                        ".jobs-search__results-list li",
+                        "[data-job-id]",
+                        "[data-entity-urn*='jobPosting']"
+                    ]
+                    
+                    for selector in alternative_selectors:
+                        alt_cards = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                        if alt_cards:
+                            logger.info(f"Found {len(alt_cards)} cards with alternative selector: {selector}")
+                            job_cards = alt_cards
+                            cards_found = len(job_cards)
+                            break
+                    
+                    if cards_found == 0:
+                        continue
+                
+                # Process job cards (limit to first 20 per role)
+                cards_to_process = min(20, cards_found)
+                logger.info(f"Processing {cards_to_process} job cards...")
+                
+                for card_index, card in enumerate(job_cards[:cards_to_process]):
+                    total_jobs_processed += 1
+                    logger.debug(f"Processing card {card_index + 1}/{cards_to_process} for role '{role}'")
+                    
+                    try:
+                        # Wait for element to be visible
+                        time.sleep(1)
+                        
+                        # Extract job title with multiple approaches
+                        job_title = ""
+                        title_selectors = [
+                            ".base-search-card__title",
+                            "h3",
+                            ".sr-only"
+                        ]
+                        
+                        for selector in title_selectors:
+                            try:
+                                title_elem = card.find_element(By.CSS_SELECTOR, selector)
+                                job_title = title_elem.text.strip()
+                                if job_title:
+                                    break
+                                # Try innerHTML if text is empty
+                                job_title = title_elem.get_attribute('innerHTML').strip()
+                                if job_title:
+                                    # Clean HTML tags
+                                    import re
+                                    job_title = re.sub(r'<[^>]+>', '', job_title).strip()
+                                    break
+                            except NoSuchElementException:
+                                continue
+                        
+                        # Extract company name
+                        company_name = ""
+                        company_selectors = [
+                            ".base-search-card__subtitle a",
+                            ".base-search-card__subtitle",
+                            "h4 a",
+                            "h4"
+                        ]
+                        
+                        for selector in company_selectors:
+                            try:
+                                company_elem = card.find_element(By.CSS_SELECTOR, selector)
+                                company_name = company_elem.text.strip()
+                                if company_name:
+                                    break
+                                # Try innerHTML if text is empty
+                                company_name = company_elem.get_attribute('innerHTML').strip()
+                                if company_name:
+                                    import re
+                                    company_name = re.sub(r'<[^>]+>', '', company_name).strip()
+                                    break
+                            except NoSuchElementException:
+                                continue
+                        
+                        # Extract location
+                        location = ""
+                        location_selectors = [
+                            ".job-search-card__location",
+                            ".job-result-card__location"
+                        ]
+                        
+                        for selector in location_selectors:
+                            try:
+                                location_elem = card.find_element(By.CSS_SELECTOR, selector)
+                                location = location_elem.text.strip()
+                                if location:
+                                    break
+                                # Try innerHTML if text is empty
+                                location = location_elem.get_attribute('innerHTML').strip()
+                                if location:
+                                    import re
+                                    location = re.sub(r'<[^>]+>', '', location).strip()
+                                    break
+                            except NoSuchElementException:
+                                continue
+                        
+                        # Extract job link
+                        job_link = ""
+                        link_selectors = [
+                            ".base-card__full-link",
+                            "a[href*='/jobs/view/']",
+                            "a"
+                        ]
+                        
+                        for selector in link_selectors:
+                            try:
+                                link_elem = card.find_element(By.CSS_SELECTOR, selector)
+                                job_link = link_elem.get_attribute("href")
+                                if job_link and '/jobs/view/' in job_link:
+                                    break
+                            except NoSuchElementException:
+                                continue
+                        
+                        # Extract posting time
+                        posted_time = ""
+                        time_selectors = [
+                            ".job-search-card__listdate--new",
+                            "time",
+                            "[datetime]"
+                        ]
+                        
+                        for selector in time_selectors:
+                            try:
+                                time_elem = card.find_element(By.CSS_SELECTOR, selector)
+                                posted_time = time_elem.get_attribute("datetime")
+                                if posted_time:
+                                    break
+                            except NoSuchElementException:
+                                continue
+                        
+                        if not posted_time:
+                            posted_time = datetime.now().strftime("%Y-%m-%d")
+                        
+                        # Log extracted data for debugging
+                        logger.debug(f"Extracted data:")
+                        logger.debug(f"  Title: '{job_title}'")
+                        logger.debug(f"  Company: '{company_name}'")
+                        logger.debug(f"  Location: '{location}'")
+                        logger.debug(f"  Link: '{job_link}'")
+                        logger.debug(f"  Posted: '{posted_time}'")
+                        
+                        # Validate extracted data
+                        if not job_title:
+                            logger.warning(f"Card {card_index + 1}: Empty job title, skipping")
+                            continue
+                        if not company_name:
+                            logger.warning(f"Card {card_index + 1}: Empty company name, skipping")
+                            continue
+                        if not job_link:
+                            logger.warning(f"Card {card_index + 1}: Empty job link, skipping")
+                            continue
+                        
+                        # Apply filters
+                        # if not self.is_relevant_role(job_title):
+                        #     logger.info(f"Skipping irrelevant role: '{job_title}'")
+                        #     continue
+                        
+                        if self.is_company_filtered(company_name):
+                            logger.info(f"Skipping filtered company: '{company_name}'")
+                            continue
+                        
+                        # Determine job type
+                        job_type = self.determine_job_type(f"{job_title} {location}")
+                        
+                        # Create job object
+                        job = Job(
+                            company_name=company_name,
+                            platform="LinkedIn",
+                            job_title=job_title,
+                            job_type=job_type,
+                            job_link=job_link,
+                            posted_time=posted_time,
+                            location=location or "Saudi Arabia"
+                        )
+                        
+                        # Check for duplicates
+                        job_hash = job.get_hash()
+                        
+                        if job_hash not in self.seen_jobs:
+                            jobs.append(job)
+                            self.seen_jobs.add(job_hash)
+                            logger.info(f"✓ Added job: '{job_title}' at '{company_name}' ({job_type})")
+                        else:
+                            logger.info(f"Duplicate job found: '{job_title}' at '{company_name}'")
+                            
+                    except Exception as e:
+                        logger.error(f"Card {card_index + 1}: Error processing - {e}")
+                        continue
+                
+                # Add delay between roles
+                delay = self.config.get('scraping', {}).get('delay_between_requests', 2)
+                logger.debug(f"Waiting {delay} seconds before next role...")
+                time.sleep(delay)
+                
+            logger.info(f"LinkedIn scraping completed. Cards found: {total_cards_found}, Cards processed: {total_jobs_processed}, Jobs extracted: {len(jobs)}")
+            
+        except Exception as e:
+            logger.error(f"LinkedIn scraping failed: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+        
+        return jobs
+  
+    # def scrape_indeed(self) -> List[Job]:
+    #     """Scrape Indeed jobs for Saudi Arabia"""
+    #     logger.info("Starting Indeed scraping...")
+    #     jobs = []
+        
+    #     try:
+    #         base_url = "https://sa.indeed.com/jobs?q={}&l=Saudi+Arabia&sort=date"
+            
+    #         for role in self.target_roles:
+    #             url = base_url.format(role.replace(' ', '+'))
+    #             self.driver.get(url)
+    #             time.sleep(3)
+                
+    #             # Extract job cards
+    #             job_cards = self.driver.find_elements(By.CSS_SELECTOR, ".job_seen_beacon")
+                
+    #             for card in job_cards[:15]:  # Limit to first 15 jobs per role
+    #                 try:
+    #                     # Extract job details
+    #                     title_elem = card.find_element(By.CSS_SELECTOR, "[data-jk] h2 a span")
+    #                     company_elem = card.find_element(By.CSS_SELECTOR, "[data-testid='company-name']")
+    #                     link_elem = card.find_element(By.CSS_SELECTOR, "[data-jk] h2 a")
+                        
+    #                     job_title = title_elem.text.strip()
+    #                     company_name = company_elem.text.strip()
+    #                     job_link = "https://sa.indeed.com" + link_elem.get_attribute("href")
+                        
+    #                     # Apply filters
+    #                     if not self.is_relevant_role(job_title):
+    #                         continue
+                            
+    #                     if self.is_company_filtered(company_name):
+    #                         continue
+                        
+    #                     # Try to get location and posting time
+    #                     try:
+    #                         location_elem = card.find_element(By.CSS_SELECTOR, "[data-testid='job-location']")
+    #                         location = location_elem.text.strip()
+    #                     except NoSuchElementException:
+    #                         location = "Saudi Arabia"
+                        
+    #                     try:
+    #                         time_elem = card.find_element(By.CSS_SELECTOR, ".date")
+    #                         posted_time = time_elem.text.strip()
+    #                     except NoSuchElementException:
+    #                         posted_time = datetime.now().strftime("%Y-%m-%d")
+                        
+    #                     job_type = self.determine_job_type(f"{job_title} {location}")
+                        
+    #                     job = Job(
+    #                         company_name=company_name,
+    #                         platform="Indeed",
+    #                         job_title=job_title,
+    #                         job_type=job_type,
+    #                         job_link=job_link,
+    #                         posted_time=posted_time,
+    #                         location=location
+    #                     )
+                        
+    #                     # Check for duplicates
+    #                     job_hash = job.get_hash()
+    #                     if job_hash not in self.seen_jobs:
+    #                         jobs.append(job)
+    #                         self.seen_jobs.add(job_hash)
+    #                         logger.info(f"Found job: {job_title} at {company_name}")
+                        
+    #                 except Exception as e:
+    #                     logger.warning(f"Error extracting job card: {e}")
+    #                     continue
+                
+    #             time.sleep(self.config.get('scraping', {}).get('delay_between_requests', 2))
+        
+    #     except Exception as e:
+    #         logger.error(f"Indeed scraping failed: {e}")
+        
+    #     return jobs
+    
+    def scrape_bayt(self) -> List[Job]:
+        """Scrape Bayt jobs for Saudi Arabia with correct selectors"""
+        logger.info("Starting Bayt scraping...")
+        jobs = []
+        
+        try:
+            base_url = "https://www.bayt.com/en/saudi-arabia/jobs/{}-jobs/"
+            
+            for role in self.target_roles:
+                formatted_role = role.replace(' ', '-').lower()
+                url = base_url.format(formatted_role)
+                
+                logger.info(f"Scraping Bayt for role: {role} - URL: {url}")
+                
+                try:
+                    self.driver.get(url)
+                    
+                    # Wait for page to load completely
+                    WebDriverWait(self.driver, 10).until(
+                        EC.presence_of_element_located((By.TAG_NAME, "body"))
+                    )
+                    
+                    # Additional wait for dynamic content
+                    time.sleep(5)
+                    
+                    # Log page title to verify page loaded
+                    page_title = self.driver.title
+                    logger.info(f"Page loaded: {page_title}")
+                    
+                    # Find job cards using the correct selector
+                    job_cards = self.driver.find_elements(By.CSS_SELECTOR, ".has-pointer-d")
+                    logger.info(f"Found {len(job_cards)} job cards")
+                    
+                    if not job_cards:
+                        logger.warning(f"No job cards found for role: {role}")
+                        continue
+                    
+                    # Process job cards
+                    for i, card in enumerate(job_cards):
+                        try:
+                            logger.info(f"Processing job card {i+1}/{len(job_cards)}")
+                            
+                            # Extract job title and link from h2 > a
+                            job_title = None
+                            job_link = None
+                            try:
+                                title_elem = card.find_element(By.CSS_SELECTOR, "h2 a")
+                                job_title = title_elem.text.strip()
+                                job_link = title_elem.get_attribute("href")
+                            except Exception as e:
+                                logger.warning(f"Could not extract job title from card {i+1}: {e}")
+                                continue
+                            
+                            # Extract company name from the span with company info
+                            company_name = None
+                            try:
+                                # The company name is in a span with class "t-default t-small t-trim"
+                                company_elem = card.find_element(By.CSS_SELECTOR, "span.t-default.t-small.t-trim")
+                                company_name = company_elem.text.strip()
+                            except Exception as e:
+                                logger.warning(f"Could not extract company name from card {i+1}: {e}")
+                                # Fallback: try to extract from card text
+                                try:
+                                    card_text = card.text
+                                    lines = card_text.split('\n')
+                                    # Look for company name in the lines after job title
+                                    for line in lines[1:]:
+                                        line = line.strip()
+                                        if (line and line != job_title and 
+                                            not line.startswith('$') and 
+                                            not line.startswith('Yesterday') and 
+                                            not line.startswith('days ago') and 
+                                            'career' not in line.lower()):
+                                            company_name = line
+                                            break
+                                except Exception:
+                                    pass
+                            
+                            # Extract location from the "t-mute t-small" div
+                            location = "Saudi Arabia"
+                            try:
+                                location_elem = card.find_element(By.CSS_SELECTOR, "div.t-mute.t-small")
+                                location_text = location_elem.text.strip()
+                                if location_text:
+                                    location = location_text
+                            except Exception as e:
+                                logger.warning(f"Could not extract location from card {i+1}: {e}")
+                            
+                            # Extract salary if available (for logging purposes)
+                            salary_info = None
+                            try:
+                                salary_elem = card.find_element(By.CSS_SELECTOR, "dt.jb-label-salary")
+                                salary_info = salary_elem.text.strip()
+                                # Remove the icon text and clean up
+                                if salary_info:
+                                    # Split by spaces and filter out empty strings
+                                    parts = [part.strip() for part in salary_info.split() if part.strip()]
+                                    # Find parts that look like salary (contain $ or numbers)
+                                    salary_parts = [
+                                        part for part in parts 
+                                        if ('$' in part or 
+                                            part.replace(',', '').replace('-', '').isdigit())
+                                    ]
+                                    if salary_parts:
+                                        salary_info = ' '.join(salary_parts)
+                                    logger.info(f"Found salary info: {salary_info}")
+                            except Exception:
+                                pass
+                            
+                            # Extract job description (for job type determination)
+                            description = None
+                            try:
+                                desc_elem = card.find_element(By.CSS_SELECTOR, "div.jb-descr")
+                                description = desc_elem.text.strip()
+                            except Exception:
+                                pass
+                            
+                            # Extract posted time
+                            posted_time = datetime.now().strftime("%Y-%m-%d")
+                            try:
+                                date_elem = card.find_element(By.CSS_SELECTOR, "span[data-automation-id='job-active-date']")
+                                posted_time_text = date_elem.text.strip()
+                                if posted_time_text:
+                                    # Convert relative time to actual date
+                                    if "Yesterday" in posted_time_text:
+                                        posted_time = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+                                    elif "days ago" in posted_time_text:
+                                        try:
+                                            days = int(posted_time_text.split()[0])
+                                            posted_time = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+                                        except Exception:
+                                            pass
+                            except Exception:
+                                pass
+                            
+                            # Validate extracted data
+                            if not job_title or not company_name:
+                                logger.warning(f"Incomplete data - Title: {job_title}, Company: {company_name}")
+                                continue
+                            
+                            # Apply filters
+                            if not self.is_relevant_role(job_title):
+                                logger.info(f"Skipping irrelevant role: {job_title}")
+                                continue
+                                
+                            if self.is_company_filtered(company_name):
+                                logger.info(f"Skipping filtered company: {company_name}")
+                                continue
+                            
+                            # Determine job type
+                            job_type = self.determine_job_type(f"{job_title} {description or ''}")
+                            
+                            # Create job object
+                            job = Job(
+                                company_name=company_name,
+                                platform="Bayt",
+                                job_title=job_title,
+                                job_type=job_type,
+                                job_link=job_link,
+                                posted_time=posted_time,
+                                location=location
+                            )
+                            
+                            # Check for duplicates
+                            job_hash = job.get_hash()
+                            if job_hash not in self.seen_jobs:
+                                jobs.append(job)
+                                self.seen_jobs.add(job_hash)
+                                logger.info(f"Successfully extracted job: {job_title} at {company_name}")
+                            else:
+                                logger.info(f"Duplicate job found: {job_title} at {company_name}")
+                        
+                        except Exception as e:
+                            logger.warning(f"Error extracting job card {i+1}: {e}")
+                            continue
+                    
+                    # Add delay between requests
+                    time.sleep(self.config.get('scraping', {}).get('delay_between_requests', 2))
+                    
+                except TimeoutException:
+                    logger.error(f"Timeout loading page for role: {role}")
+                    continue
+                except Exception as e:
+                    logger.error(f"Error scraping role {role}: {e}")
+                    continue
+        
+        except Exception as e:
+            logger.error(f"Bayt scraping failed: {e}")
+        
+        logger.info(f"Bayt scraping completed. Found {len(jobs)} jobs.")
+        return jobs
+   
+    def save_to_airtable(self, jobs: List[Job]):
+        """Save jobs to Airtable in batches"""
+        try:
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            # Prepare job data to send to Airtable
+            records = []
+            for job in jobs:
+                record = {
+                    "fields": {
+                        "Company Name": job.company_name,
+                        "Platform": job.platform,
+                        "Job Title": job.job_title,
+                        "Job Type": job.job_type,
+                        "Job Link": job.job_link,
+                        "Posted Time": job.posted_time,
+                        "Location": job.location,
+                        "Scraped At": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                }
+                records.append(record)
+            
+            # Process records in batches of 10
+            batch_size = 10
+            total_saved = 0
+            
+            for i in range(0, len(records), batch_size):
+                batch = records[i:i + batch_size]
+                payload = {"records": batch}
+                
+                response = requests.post(self.api_url, headers=headers, data=json.dumps(payload))
+                
+                if response.status_code == 200:
+                    batch_count = len(batch)
+                    total_saved += batch_count
+                    logger.info(f"Successfully saved batch of {batch_count} jobs to Airtable")
+                    
+                    # Optional: Add a small delay between batches to avoid rate limiting
+                    if i + batch_size < len(records):  # Don't sleep after the last batch
+                        time.sleep(0.2)  # 200ms delay
+                else:
+                    logger.error(f"Failed to save batch to Airtable: {response.status_code}, {response.text}")
+                    # Continue with remaining batches even if one fails
+            
+            logger.info(f"Total jobs saved to Airtable: {total_saved}/{len(jobs)}")
+            
+        except Exception as e:
+            logger.error(f"Error while saving to Airtable: {e}")
+   
+    def send_slack_notification(self, job_count: int, jobs: List[Job]):
+        """Send Slack notification about new jobs"""
+        try:
+            webhook_url = self.config.get('slack', {}).get('webhook_url')
+            if not webhook_url:
+                logger.warning("Slack webhook URL not configured")
+                return
+            
+            # Prepare message
+            if job_count == 0:
+                message = "🔍 Job Scraper Update: No new jobs found today."
+            else:
+                remote_count = len([j for j in jobs if j.job_type == "Remote"])
+                hybrid_count = len([j for j in jobs if j.job_type == "Hybrid"])
+                
+                message = f"""🚀 Job Scraper Update: Found {job_count} new jobs!
+
+📊 Job Types:
+• Remote: {remote_count}
+• Hybrid: {hybrid_count}
+• Offline: {job_count - remote_count - hybrid_count}
+
+🌐 Platforms:
+• LinkedIn: {len([j for j in jobs if j.platform == "LinkedIn"])}
+• Indeed: {len([j for j in jobs if j.platform == "Indeed"])}
+• Bayt: {len([j for j in jobs if j.platform == "Bayt"])}
+
+🎯 Target Roles: Graphic Designer, UI/UX Designer, Full Stack Developer, Motion Graphics Designer
+
+Check your Google Sheets for detailed job listings! 📈"""
+            
+            payload = {
+                "text": message,
+                "username": "Job Scraper Bot",
+                "icon_emoji": ":robot_face:"
+            }
+            
+            response = requests.post(webhook_url, json=payload)
+            response.raise_for_status()
+            
+            logger.info("Slack notification sent successfully")
+            
+        except Exception as e:
+            logger.error(f"Failed to send Slack notification: {e}")
+    
+    def run_scraper(self):
+        """Main scraper execution"""
+        logger.info("Starting job scraper for Saudi Arabia...")
+        
+        try:
+            # Setup driver
+            self.setup_driver()
+            
+            # Scrape all platforms
+            all_jobs = []
+            
+            # LinkedIn
+            # linkedin_jobs = self.scrape_linkedin()
+            # all_jobs.extend(linkedin_jobs)
+            
+            # Indeed
+            # indeed_jobs = self.scrape_indeed()
+            # all_jobs.extend(indeed_jobs)
+            
+            # # Bayt
+            bayt_jobs = self.scrape_bayt()
+            all_jobs.extend(bayt_jobs)
+            
+            # Filter out duplicates across platforms
+            unique_jobs = []
+            seen_hashes = set()
+            
+            for job in all_jobs:
+                job_hash = job.get_hash()
+                if job_hash not in seen_hashes:
+                    unique_jobs.append(job)
+                    seen_hashes.add(job_hash)
+            
+            logger.info(f"Found {len(unique_jobs)} unique jobs after deduplication")
+            
+            # # Save to Google Sheets
+            # if unique_jobs:
+            #     self.save_to_google_sheets(unique_jobs)
+            
+            if unique_jobs:
+               self.save_to_airtable(unique_jobs)  # Added Airtable save call here
+ 
+            # # Send Slack notification
+            # self.send_slack_notification(len(unique_jobs), unique_jobs)
+            
+            # Print summary
+            print(f"\n{'='*50}")
+            print(f"SCRAPING SUMMARY")
+            print(f"{'='*50}")
+            print(f"Total jobs found: {len(unique_jobs)}")
+            print(f"Remote jobs: {len([j for j in unique_jobs if j.job_type == 'Remote'])}")
+            print(f"Hybrid jobs: {len([j for j in unique_jobs if j.job_type == 'Hybrid'])}")
+            print(f"LinkedIn: {len([j for j in unique_jobs if j.platform == 'LinkedIn'])}")
+            print(f"Indeed: {len([j for j in unique_jobs if j.platform == 'Indeed'])}")
+            print(f"Bayt: {len([j for j in unique_jobs if j.platform == 'Bayt'])}")
+            print(f"{'='*50}")
+            
+            # return unique_jobs
+            return []
+            
+        except Exception as e:
+            logger.error(f"Scraper execution failed: {e}")
+            return []
+        
+        finally:
+            if self.driver:
+                self.driver.quit()
+
+def main():
+    """Main execution function"""
+    scraper = JobScraper()
+    jobs = scraper.run_scraper()
+    return jobs
+
+if __name__ == "__main__":
+    main()

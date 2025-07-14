@@ -1,0 +1,94 @@
+# .github/workflows/job-scraper.yml
+name: Daily Job Scraper
+
+on:
+  schedule:
+    # Run every day at 9:00 AM UTC (adjust timezone as needed)
+    - cron: "0 9 * * *"
+
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: "Platforms to scrape (comma-separated: linkedin,bayt,indeed)"
+        required: false
+        default: "linkedin,bayt,indeed"
+      roles:
+        description: "Custom roles to search (comma-separated)"
+        required: false
+        default: ""
+
+jobs:
+  scrape-jobs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
+
+      - name: Install Chrome
+        run: |
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+          sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list'
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
+
+      - name: Install ChromeDriver
+        run: |
+          # Get Chrome version
+          CHROME_VERSION=$(google-chrome --version | cut -d " " -f3 | cut -d "." -f1)
+
+          # Download compatible ChromeDriver
+          wget -O /tmp/chromedriver.zip "https://chromedriver.storage.googleapis.com/$(curl -s https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROME_VERSION})/chromedriver_linux64.zip"
+
+          # Extract and install
+          sudo unzip /tmp/chromedriver.zip -d /usr/local/bin/
+          sudo chmod +x /usr/local/bin/chromedriver
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install requests selenium python-dotenv
+
+      - name: Create config file
+        run: |
+          cat > config.json << EOF
+          {
+            "airtable": {
+              "api_key": "${{ secrets.AIRTABLE_API_KEY }}",
+              "base_id": "${{ secrets.AIRTABLE_BASE_ID }}",
+              "table_name": "Jobs"
+            },
+            "slack": {
+              "webhook_url": "${{ secrets.SLACK_WEBHOOK_URL }}"
+            },
+            "scraping": {
+              "headless": true,
+              "delay_between_requests": 2,
+              "max_pages_per_site": 5
+            }
+          }
+          EOF
+
+      - name: Run job scraper
+        run: |
+          python job_scraper.py
+        env:
+          DISPLAY: :99.0
+          CHROME_BIN: /usr/bin/google-chrome
+          CHROMEDRIVER_PATH: /usr/local/bin/chromedriver
+
+      - name: Upload logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: scraper-logs
+          path: |
+            *.log
+            screenshot*.png
+          retention-days: 7
