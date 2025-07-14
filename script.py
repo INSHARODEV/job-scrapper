@@ -65,7 +65,7 @@ class JobScraper:
             ]
         }
         self.target_roles = [
-            'graphic designer', 'ui/ux designer', 'full stack developer',
+            'graphic designer', 'full stack developer','ui/ux designer', 
             'motion graphic designer', 'frontend developer', 'backend developer',
             'web developer', 'mobile developer', 'react developer', 'angular developer',"مصمم جرافيك"
         ]
@@ -809,8 +809,8 @@ Check your Google Sheets for detailed job listings! 📈"""
             all_jobs = []
             
             # LinkedIn
-            # linkedin_jobs = self.scrape_linkedin()
-            # all_jobs.extend(linkedin_jobs)
+            linkedin_jobs = self.scrape_linkedin()
+            all_jobs.extend(linkedin_jobs)
             
             # Indeed
             # indeed_jobs = self.scrape_indeed()

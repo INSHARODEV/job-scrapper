@@ -5,19 +5,20 @@ on:
     - cron: "0 9 * * *"
   # Allow manual trigger
   workflow_dispatch:
-    inputs:
-      platforms:
-        description: "Platforms to scrape (comma-separated: linkedin,bayt,indeed)"
-        required: false
-        default: "linkedin,bayt,indeed"
-      roles:
-        description: "Custom roles to search (comma-separated)"
-        required: false
-        default: ""
+  #   inputs:
+  #     platforms:
+  #       description: "Platforms to scrape (comma-separated: linkedin,bayt,indeed)"
+  #       required: false
+  #       default: "linkedin,bayt,indeed"
+  #     roles:
+  #       description: "Custom roles to search (comma-separated)"
+  #       required: false
+  #       default: ""
 
 jobs:
   scrape-jobs:
     runs-on: ubuntu-latest
+    environment: job-scrapper-env
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
