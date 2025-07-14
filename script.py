@@ -136,15 +136,14 @@ class JobScraper:
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--disable-extensions")
         chrome_options.add_argument("--disable-plugins")
-        chrome_options.add_argument("--disable-images")  # Faster loading
-        chrome_options.add_argument("--disable-javascript")  # Optional: disable JS if not needed
-        
-        # Anti-detection measures
+        chrome_options.add_argument("--disable-images")
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-        chrome_options.add_argument("--disable-features=VizDisplayCompositor")
-        chrome_options.add_argument("--disable-ipc-flooding-protection")
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
+        # chrome_options.add_argument("--disable-javascript")  # Optional: disable JS if not needed
+        
+        # Anti-detection measures
+        chrome_options.add_argument("--disable-ipc-flooding-protection")
         
         # User agent and window settings
         chrome_options.add_argument(f"--user-agent={selected_user_agent}")
@@ -273,17 +272,17 @@ class JobScraper:
                 self.driver.get(url)
                 
                 # Wait for page to load completely
-                time.sleep(5)
+                time.sleep(random.uniform(3, 7))
                 
                 # Scroll and load more jobs
                 logger.info("Scrolling to load more jobs...")
                 for scroll_attempt in range(3):
                     logger.debug(f"Scroll attempt {scroll_attempt + 1}/3")
                     self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                    time.sleep(3)  # Increased wait time
+                    time.sleep(random.uniform(3, 7))
                 
                 # Wait for dynamic content to load
-                time.sleep(3)
+                time.sleep(random.uniform(3, 7))
                 
                 # Extract job cards
                 logger.info("Extracting job cards...")
@@ -325,7 +324,7 @@ class JobScraper:
                     
                     try:
                         # Wait for element to be visible
-                        time.sleep(1)
+                        time.sleep(random.uniform(3, 7))
                         
                         # Extract job title with multiple approaches
                         job_title = ""
@@ -503,84 +502,7 @@ class JobScraper:
             logger.error(f"Traceback: {traceback.format_exc()}")
         
         return jobs
-  
-    # def scrape_indeed(self) -> List[Job]:
-    #     """Scrape Indeed jobs for Saudi Arabia"""
-    #     logger.info("Starting Indeed scraping...")
-    #     jobs = []
-        
-    #     try:
-    #         base_url = "https://sa.indeed.com/jobs?q={}&l=Saudi+Arabia&sort=date"
-            
-    #         for role in self.target_roles:
-    #             url = base_url.format(role.replace(' ', '+'))
-    #             self.driver.get(url)
-    #             time.sleep(3)
-                
-    #             # Extract job cards
-    #             job_cards = self.driver.find_elements(By.CSS_SELECTOR, ".job_seen_beacon")
-                
-    #             for card in job_cards[:15]:  # Limit to first 15 jobs per role
-    #                 try:
-    #                     # Extract job details
-    #                     title_elem = card.find_element(By.CSS_SELECTOR, "[data-jk] h2 a span")
-    #                     company_elem = card.find_element(By.CSS_SELECTOR, "[data-testid='company-name']")
-    #                     link_elem = card.find_element(By.CSS_SELECTOR, "[data-jk] h2 a")
-                        
-    #                     job_title = title_elem.text.strip()
-    #                     company_name = company_elem.text.strip()
-    #                     job_link = "https://sa.indeed.com" + link_elem.get_attribute("href")
-                        
-    #                     # Apply filters
-    #                     if not self.is_relevant_role(job_title):
-    #                         continue
-                            
-    #                     if self.is_company_filtered(company_name):
-    #                         continue
-                        
-    #                     # Try to get location and posting time
-    #                     try:
-    #                         location_elem = card.find_element(By.CSS_SELECTOR, "[data-testid='job-location']")
-    #                         location = location_elem.text.strip()
-    #                     except NoSuchElementException:
-    #                         location = "Saudi Arabia"
-                        
-    #                     try:
-    #                         time_elem = card.find_element(By.CSS_SELECTOR, ".date")
-    #                         posted_time = time_elem.text.strip()
-    #                     except NoSuchElementException:
-    #                         posted_time = datetime.now().strftime("%Y-%m-%d")
-                        
-    #                     job_type = self.determine_job_type(f"{job_title} {location}")
-                        
-    #                     job = Job(
-    #                         company_name=company_name,
-    #                         platform="Indeed",
-    #                         job_title=job_title,
-    #                         job_type=job_type,
-    #                         job_link=job_link,
-    #                         posted_time=posted_time,
-    #                         location=location
-    #                     )
-                        
-    #                     # Check for duplicates
-    #                     job_hash = job.get_hash()
-    #                     if job_hash not in self.seen_jobs:
-    #                         jobs.append(job)
-    #                         self.seen_jobs.add(job_hash)
-    #                         logger.info(f"Found job: {job_title} at {company_name}")
-                        
-    #                 except Exception as e:
-    #                     logger.warning(f"Error extracting job card: {e}")
-    #                     continue
-                
-    #             time.sleep(self.config.get('scraping', {}).get('delay_between_requests', 2))
-        
-    #     except Exception as e:
-    #         logger.error(f"Indeed scraping failed: {e}")
-        
-    #     return jobs
-    
+ 
     def scrape_bayt(self) -> List[Job]:
         """Scrape Bayt jobs for Saudi Arabia with correct selectors"""
         logger.info("Starting Bayt scraping...")
@@ -604,7 +526,7 @@ class JobScraper:
                     )
                     
                     # Additional wait for dynamic content
-                    time.sleep(5)
+                    time.sleep(random.uniform(3, 7))
                     
                     # Log page title to verify page loaded
                     page_title = self.driver.title
@@ -719,7 +641,12 @@ class JobScraper:
                             # Validate extracted data
                             if not job_title or not company_name:
                                 logger.warning(f"Incomplete data - Title: {job_title}, Company: {company_name}")
-                                continue
+                                # Try alternative extraction methods
+                                try:
+                                    # Fallback extraction logic here
+                                    pass
+                                except:
+                                    continue
                             
                             # Apply filters
                             if not self.is_relevant_role(job_title):
