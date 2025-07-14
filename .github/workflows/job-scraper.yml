@@ -59,7 +59,7 @@ jobs:
 
       - name: Run job scraper
         run: |
-          python job_scraper.py
+          python script.py
         env:
           DISPLAY: :99.0
 
