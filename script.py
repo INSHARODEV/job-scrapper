@@ -262,7 +262,8 @@ class JobScraper:
         
         try:
             # LinkedIn job search URL for Saudi Arabia
-            base_url = "https://www.linkedin.com/jobs/search/?keywords={}&location=Saudi%20Arabia&f_TPR=r86400"
+            base_url = "https://www.linkedin.com/jobs/search/?keywords={}&location=Saudi%20Arabia"
+            # base_url = "https://www.linkedin.com/jobs/search/?keywords={}&location=Saudi%20Arabia&f_TPR=r86400"
             
             for role_index, role in enumerate(self.target_roles):
                 logger.info(f"Scraping role {role_index + 1}/{len(self.target_roles)}: '{role}'")
@@ -509,6 +510,7 @@ class JobScraper:
         jobs = []
         
         try:
+            # base_url = "https://www.bayt.com/en/saudi-arabia/jobs/{}-jobs/?date=1"
             base_url = "https://www.bayt.com/en/saudi-arabia/jobs/{}-jobs/"
             
             for role in self.target_roles:
