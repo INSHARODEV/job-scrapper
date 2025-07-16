@@ -509,8 +509,7 @@ class JobScraper:
         jobs = []
         
         try:
-            # base_url = "https://www.bayt.com/en/saudi-arabia/jobs/{}-jobs/?date=1"
-            base_url = "https://www.bayt.com/en/saudi-arabia/jobs/{}-jobs/"
+            base_url = "https://www.bayt.com/en/saudi-arabia/jobs/{}-jobs/?date=1"
             
             for role in self.target_roles:
                 formatted_role = role.replace(' ', '-').lower()
@@ -557,7 +556,7 @@ class JobScraper:
                                 logger.warning(f"Could not extract job title from card {i+1}: {e}")
                                 continue
                             
-                            # Extract company name from the span with company info
+                            # Extract company name from the company link
                             company_name = None
                             try:
                                 # The company name is in a link with class "t-default t-bold"
@@ -650,8 +649,8 @@ class JobScraper:
                                             posted_time = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
                                         except Exception:
                                             pass
-                                    # elif "day ago" in posted_time_text:
-                                    #     posted_time = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+                                    elif "day ago" in posted_time_text:
+                                        posted_time = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
                             except Exception:
                                 pass
                             
