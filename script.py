@@ -262,8 +262,7 @@ class JobScraper:
         
         try:
             # LinkedIn job search URL for Saudi Arabia
-            base_url = "https://www.linkedin.com/jobs/search/?keywords={}&location=Saudi%20Arabia"
-            # base_url = "https://www.linkedin.com/jobs/search/?keywords={}&location=Saudi%20Arabia&f_TPR=r86400"
+            base_url = "https://www.linkedin.com/jobs/search/?keywords={}&location=Saudi%20Arabia&f_TPR=r86400"
             
             for role_index, role in enumerate(self.target_roles):
                 logger.info(f"Scraping role {role_index + 1}/{len(self.target_roles)}: '{role}'")
@@ -561,8 +560,8 @@ class JobScraper:
                             # Extract company name from the span with company info
                             company_name = None
                             try:
-                                # The company name is in a span with class "t-default t-small t-trim"
-                                company_elem = card.find_element(By.CSS_SELECTOR, "span.t-default.t-small.t-trim")
+                                # The company name is in a link with class "t-default t-bold"
+                                company_elem = card.find_element(By.CSS_SELECTOR, "a.t-default.t-bold")
                                 company_name = company_elem.text.strip()
                             except Exception as e:
                                 logger.warning(f"Could not extract company name from card {i+1}: {e}")
@@ -577,48 +576,62 @@ class JobScraper:
                                             not line.startswith('$') and 
                                             not line.startswith('Yesterday') and 
                                             not line.startswith('days ago') and 
-                                            'career' not in line.lower()):
+                                            'career' not in line.lower() and
+                                            'Easy Apply' not in line):
                                             company_name = line
                                             break
                                 except Exception:
                                     pass
                             
-                            # Extract location from the "t-mute t-small" div
+                            # Extract location from the div with class "t-mute t-small"
                             location = "Saudi Arabia"
                             try:
                                 location_elem = card.find_element(By.CSS_SELECTOR, "div.t-mute.t-small")
                                 location_text = location_elem.text.strip()
                                 if location_text:
-                                    location = location_text
+                                    # Extract the city name (before the ·)
+                                    location_parts = location_text.split('·')
+                                    if len(location_parts) >= 2:
+                                        city = location_parts[0].strip()
+                                        country = location_parts[1].strip()
+                                        location = f"{city}, {country}"
+                                    else:
+                                        location = location_text
                             except Exception as e:
                                 logger.warning(f"Could not extract location from card {i+1}: {e}")
                             
-                            # Extract salary if available (for logging purposes)
+                            # Extract salary if available
                             salary_info = None
                             try:
                                 salary_elem = card.find_element(By.CSS_SELECTOR, "dt.jb-label-salary")
-                                salary_info = salary_elem.text.strip()
-                                # Remove the icon text and clean up
-                                if salary_info:
-                                    # Split by spaces and filter out empty strings
-                                    parts = [part.strip() for part in salary_info.split() if part.strip()]
-                                    # Find parts that look like salary (contain $ or numbers)
-                                    salary_parts = [
-                                        part for part in parts 
-                                        if ('$' in part or 
-                                            part.replace(',', '').replace('-', '').isdigit())
-                                    ]
-                                    if salary_parts:
-                                        salary_info = ' '.join(salary_parts)
-                                    logger.info(f"Found salary info: {salary_info}")
+                                salary_text = salary_elem.text.strip()
+                                if salary_text:
+                                    # Remove the icon and extract just the salary range
+                                    salary_parts = salary_text.split('$')
+                                    if len(salary_parts) > 1:
+                                        salary_info = '$' + '$'.join(salary_parts[1:])
+                                        logger.info(f"Found salary info: {salary_info}")
                             except Exception:
                                 pass
                             
-                            # Extract job description (for job type determination)
+                            # Extract job description
                             description = None
                             try:
                                 desc_elem = card.find_element(By.CSS_SELECTOR, "div.jb-descr")
                                 description = desc_elem.text.strip()
+                            except Exception:
+                                pass
+                            
+                            # Extract career level
+                            career_level = None
+                            try:
+                                career_elem = card.find_element(By.CSS_SELECTOR, "dt.jb-label-careerlevel")
+                                career_level = career_elem.text.strip()
+                                if career_level:
+                                    # Remove the icon text
+                                    career_parts = career_level.split()
+                                    if len(career_parts) >= 2:
+                                        career_level = ' '.join(career_parts[1:])  # Skip the first part (icon)
                             except Exception:
                                 pass
                             
@@ -637,18 +650,31 @@ class JobScraper:
                                             posted_time = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
                                         except Exception:
                                             pass
+                                    # elif "day ago" in posted_time_text:
+                                    #     posted_time = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
                             except Exception:
                                 pass
                             
                             # Validate extracted data
-                            if not job_title or not company_name:
-                                logger.warning(f"Incomplete data - Title: {job_title}, Company: {company_name}")
-                                # Try alternative extraction methods
+                            if not job_title:
+                                logger.warning(f"No job title found for card {i+1}")
+                                continue
+                                
+                            if not company_name:
+                                logger.warning(f"No company name found for card {i+1} - Title: {job_title}")
+                                # Try one more fallback - look for any bold text that might be company name
                                 try:
-                                    # Fallback extraction logic here
-                                    pass
+                                    bold_elems = card.find_elements(By.CSS_SELECTOR, ".t-bold")
+                                    for elem in bold_elems:
+                                        text = elem.text.strip()
+                                        if text and text != job_title and 'Easy Apply' not in text:
+                                            company_name = text
+                                            break
                                 except:
-                                    continue
+                                    pass
+                                
+                                if not company_name:
+                                    company_name = "Unknown Company"
                             
                             # Apply filters
                             if not self.is_relevant_role(job_title):
@@ -673,7 +699,13 @@ class JobScraper:
                                 location=location
                             )
                             
-                            # Check for duplicates
+                            if salary_info:
+                                job.salary_info = salary_info
+                            if career_level:
+                                job.career_level = career_level
+                            if description:
+                                job.description = description
+                            
                             job_hash = job.get_hash()
                             if job_hash not in self.seen_jobs:
                                 jobs.append(job)
