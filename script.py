@@ -17,6 +17,7 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.common.exceptions import NoSuchElementException
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -559,28 +560,65 @@ class JobScraper:
                             # Extract company name from the company link
                             company_name = None
                             try:
-                                # The company name is in a link with class "t-default t-bold"
+                                # Strategy 1: Look for a.t-default.t-bold (original selector)
                                 company_elem = card.find_element(By.CSS_SELECTOR, "a.t-default.t-bold")
                                 company_name = company_elem.text.strip()
+                                logger.info(f"Found company name using a.t-default.t-bold: {company_name}")
                             except Exception as e:
-                                logger.warning(f"Could not extract company name from card {i+1}: {e}")
-                                # Fallback: try to extract from card text
+                                logger.warning(f"Strategy 1 failed for card {i+1}: {e}")
                                 try:
-                                    card_text = card.text
-                                    lines = card_text.split('\n')
-                                    # Look for company name in the lines after job title
-                                    for line in lines[1:]:
-                                        line = line.strip()
-                                        if (line and line != job_title and 
-                                            not line.startswith('$') and 
-                                            not line.startswith('Yesterday') and 
-                                            not line.startswith('days ago') and 
-                                            'career' not in line.lower() and
-                                            'Easy Apply' not in line):
-                                            company_name = line
-                                            break
-                                except Exception:
-                                    pass
+                                    # Strategy 2: Look for <b> tag in the job-company-location-wrapper
+                                    company_elem = card.find_element(By.CSS_SELECTOR, ".job-company-location-wrapper b")
+                                    company_name = company_elem.text.strip()
+                                    logger.info(f"Found company name using <b> tag: {company_name}")
+                                except Exception as e:
+                                    logger.warning(f"Strategy 2 failed for card {i+1}: {e}")
+                                    
+                                    # Strategy 3: Look for any bold text that might be company name
+                                    try:
+                                        bold_elems = card.find_elements(By.CSS_SELECTOR, "b, .t-bold")
+                                        for elem in bold_elems:
+                                            text = elem.text.strip()
+                                            if (text and text != job_title and 
+                                                'Easy Apply' not in text and 
+                                                'Saudi nationals' not in text and
+                                                'Mid career' not in text and
+                                                'Senior' not in text and
+                                                'Entry level' not in text):
+                                                company_name = text
+                                                logger.info(f"Found company name using fallback bold text: {company_name}")
+                                                break
+                                    except Exception as e:
+                                        logger.warning(f"Strategy 3 failed for card {i+1}: {e}")
+                                        
+                                        # Strategy 4: Parse from card text structure
+                                        try:
+                                            card_text = card.text
+                                            lines = card_text.split('\n')
+                                            # Look for company name in the lines after job title
+                                            for line in lines[1:]:
+                                                line = line.strip()
+                                                if (line and line != job_title and 
+                                                    not line.startswith('$') and 
+                                                    not line.startswith('Yesterday') and 
+                                                    not line.startswith('days ago') and 
+                                                    'career' not in line.lower() and
+                                                    'Easy Apply' not in line and
+                                                    'Saudi nationals' not in line and
+                                                    'Saudi Arabia' not in line and
+                                                    not line.startswith('Seeking')):
+                                                    company_name = line
+                                                    logger.info(f"Found company name using text parsing: {company_name}")
+                                                    break
+                                        except Exception as e:
+                                            logger.warning(f"Strategy 4 failed for card {i+1}: {e}")
+
+                            # Final validation
+                            if not company_name:
+                                logger.warning(f"No company name found for card {i+1} - Title: {job_title}")
+                                company_name = "Unknown Company"
+                            else:
+                                logger.info(f"Successfully extracted company name: {company_name}")
                             
                             # Extract location from the div with class "t-mute t-small"
                             location = "Saudi Arabia"
@@ -658,22 +696,6 @@ class JobScraper:
                             if not job_title:
                                 logger.warning(f"No job title found for card {i+1}")
                                 continue
-                                
-                            if not company_name:
-                                logger.warning(f"No company name found for card {i+1} - Title: {job_title}")
-                                # Try one more fallback - look for any bold text that might be company name
-                                try:
-                                    bold_elems = card.find_elements(By.CSS_SELECTOR, ".t-bold")
-                                    for elem in bold_elems:
-                                        text = elem.text.strip()
-                                        if text and text != job_title and 'Easy Apply' not in text:
-                                            company_name = text
-                                            break
-                                except:
-                                    pass
-                                
-                                if not company_name:
-                                    company_name = "Unknown Company"
                             
                             # Apply filters
                             if not self.is_relevant_role(job_title):
@@ -732,7 +754,7 @@ class JobScraper:
         
         logger.info(f"Bayt scraping completed. Found {len(jobs)} jobs.")
         return jobs
-   
+    
     def save_to_airtable(self, jobs: List[Job]):
         """Save jobs to Airtable in batches"""
         try:
@@ -785,51 +807,6 @@ class JobScraper:
         except Exception as e:
             logger.error(f"Error while saving to Airtable: {e}")
    
-    def send_slack_notification(self, job_count: int, jobs: List[Job]):
-        """Send Slack notification about new jobs"""
-        try:
-            webhook_url = self.config.get('slack', {}).get('webhook_url')
-            if not webhook_url:
-                logger.warning("Slack webhook URL not configured")
-                return
-            
-            # Prepare message
-            if job_count == 0:
-                message = "🔍 Job Scraper Update: No new jobs found today."
-            else:
-                remote_count = len([j for j in jobs if j.job_type == "Remote"])
-                hybrid_count = len([j for j in jobs if j.job_type == "Hybrid"])
-                
-                message = f"""🚀 Job Scraper Update: Found {job_count} new jobs!
-
-📊 Job Types:
-• Remote: {remote_count}
-• Hybrid: {hybrid_count}
-• Offline: {job_count - remote_count - hybrid_count}
-
-🌐 Platforms:
-• LinkedIn: {len([j for j in jobs if j.platform == "LinkedIn"])}
-• Indeed: {len([j for j in jobs if j.platform == "Indeed"])}
-• Bayt: {len([j for j in jobs if j.platform == "Bayt"])}
-
-🎯 Target Roles: Graphic Designer, UI/UX Designer, Full Stack Developer, Motion Graphics Designer
-
-Check your Google Sheets for detailed job listings! 📈"""
-            
-            payload = {
-                "text": message,
-                "username": "Job Scraper Bot",
-                "icon_emoji": ":robot_face:"
-            }
-            
-            response = requests.post(webhook_url, json=payload)
-            response.raise_for_status()
-            
-            logger.info("Slack notification sent successfully")
-            
-        except Exception as e:
-            logger.error(f"Failed to send Slack notification: {e}")
-    
     def run_scraper(self):
         """Main scraper execution"""
         logger.info("Starting job scraper for Saudi Arabia...")
@@ -842,8 +819,8 @@ Check your Google Sheets for detailed job listings! 📈"""
             all_jobs = []
             
             # LinkedIn
-            linkedin_jobs = self.scrape_linkedin()
-            all_jobs.extend(linkedin_jobs)
+            # linkedin_jobs = self.scrape_linkedin()
+            # all_jobs.extend(linkedin_jobs)
             
             # Indeed
             # indeed_jobs = self.scrape_indeed()
