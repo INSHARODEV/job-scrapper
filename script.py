@@ -410,6 +410,7 @@ class JobScraper:
                                 link_elem = card.find_element(By.CSS_SELECTOR, selector)
                                 job_link = link_elem.get_attribute("href")
                                 if job_link and '/jobs/view/' in job_link:
+                                    job_link = job_link.split('?')[0]
                                     break
                             except NoSuchElementException:
                                 continue
@@ -553,6 +554,8 @@ class JobScraper:
                                 title_elem = card.find_element(By.CSS_SELECTOR, "h2 a")
                                 job_title = title_elem.text.strip()
                                 job_link = title_elem.get_attribute("href")
+                                if job_link:
+                                    job_link = job_link.split('?')[0]
                             except Exception as e:
                                 logger.warning(f"Could not extract job title from card {i+1}: {e}")
                                 continue
