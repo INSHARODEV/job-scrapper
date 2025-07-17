@@ -479,12 +479,12 @@ class JobScraper:
                         # Check for duplicates
                         job_hash = job.get_hash()
                         
-                        if job_hash not in self.seen_jobs:
-                            jobs.append(job)
-                            self.seen_jobs.add(job_hash)
-                            logger.info(f"✓ Added job: '{job_title}' at '{company_name}' ({job_type})")
-                        else:
-                            logger.info(f"Duplicate job found: '{job_title}' at '{company_name}'")
+                        # if job_hash not in self.seen_jobs:
+                        jobs.append(job)
+                        #     self.seen_jobs.add(job_hash)
+                        #     logger.info(f"✓ Added job: '{job_title}' at '{company_name}' ({job_type})")
+                        # else:
+                        #     logger.info(f"Duplicate job found: '{job_title}' at '{company_name}'")
                             
                     except Exception as e:
                         logger.error(f"Card {card_index + 1}: Error processing - {e}")
@@ -819,16 +819,16 @@ class JobScraper:
             all_jobs = []
             
             # LinkedIn
-            # linkedin_jobs = self.scrape_linkedin()
-            # all_jobs.extend(linkedin_jobs)
+            linkedin_jobs = self.scrape_linkedin()
+            all_jobs.extend(linkedin_jobs)
             
             # Indeed
             # indeed_jobs = self.scrape_indeed()
             # all_jobs.extend(indeed_jobs)
             
             # # Bayt
-            bayt_jobs = self.scrape_bayt()
-            all_jobs.extend(bayt_jobs)
+            # bayt_jobs = self.scrape_bayt()
+            # all_jobs.extend(bayt_jobs)
             
             # Filter out duplicates across platforms
             unique_jobs = []
@@ -836,9 +836,9 @@ class JobScraper:
             
             for job in all_jobs:
                 job_hash = job.get_hash()
-                if job_hash not in seen_hashes:
-                    unique_jobs.append(job)
-                    seen_hashes.add(job_hash)
+                # if job_hash not in seen_hashes:
+                unique_jobs.append(job)
+                # seen_hashes.add(job_hash)
             
             logger.info(f"Found {len(unique_jobs)} unique jobs after deduplication")
             
