@@ -827,12 +827,12 @@ class JobScraper:
             # all_jobs.extend(indeed_jobs)
             
             # # Bayt
-            # bayt_jobs = self.scrape_bayt()
-            # all_jobs.extend(bayt_jobs)
+            bayt_jobs = self.scrape_bayt()
+            all_jobs.extend(bayt_jobs)
             
             # Filter out duplicates across platforms
             unique_jobs = []
-            seen_hashes = set()
+            # seen_hashes = set()
             
             for job in all_jobs:
                 job_hash = job.get_hash()
