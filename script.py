@@ -798,6 +798,58 @@ class JobScraper:
         logger.info(f"Bayt scraping completed. Found {len(jobs)} jobs.")
         return jobs
     
+    def save_to_airtable(self, jobs: List[Job]):
+        """Save jobs to Airtable in batches"""
+        try:
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            # Prepare job data to send to Airtable
+            records = []
+            for job in jobs:
+                record = {
+                    "fields": {
+                        "Company Name": job.company_name,
+                        "Platform": job.platform,
+                        "Job Title": job.job_title,
+                        "Job Type": job.job_type,
+                        "Job Link": job.job_link,
+                        "Posted Time": job.posted_time,
+                        "Location": job.location,
+                        "Scraped At": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                }
+                records.append(record)
+            
+            # Process records in batches of 10
+            batch_size = 10
+            total_saved = 0
+            
+            for i in range(0, len(records), batch_size):
+                batch = records[i:i + batch_size]
+                payload = {"records": batch}
+                
+                response = requests.post(self.api_url, headers=headers, data=json.dumps(payload))
+                
+                if response.status_code == 200:
+                    batch_count = len(batch)
+                    total_saved += batch_count
+                    logger.info(f"Successfully saved batch of {batch_count} jobs to Airtable")
+                    
+                    # Optional: Add a small delay between batches to avoid rate limiting
+                    if i + batch_size < len(records):  # Don't sleep after the last batch
+                        time.sleep(0.2)  # 200ms delay
+                else:
+                    logger.error(f"Failed to save batch to Airtable: {response.status_code}, {response.text}")
+                    # Continue with remaining batches even if one fails
+            
+            logger.info(f"Total jobs saved to Airtable: {total_saved}/{len(jobs)}")
+            
+        except Exception as e:
+            logger.error(f"Error while saving to Airtable: {e}")
+   
     def run_scraper(self):
         """Main scraper execution"""
         logger.info("Starting job scraper for Saudi Arabia...")
