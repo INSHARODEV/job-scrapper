@@ -552,257 +552,246 @@ class JobScraper:
         try:
             base_url = "https://www.bayt.com/en/saudi-arabia/jobs/{}-jobs/?date=1"
             
-            expanded_roles = []
+
             for role in self.target_roles:
-                expanded_roles.extend([
-                    role,
-                    f"{role} specialist",
-                    f"{role} manager",
-                    f"{role} lead",
-                    f"{role} senior",
-                    f"{role} junior",
-                    f"{role} analyst",
-                    f"{role} engineer"
-                ])
-                for role in expanded_roles:
-                    formatted_role = role.replace(' ', '-').lower()
-                    url = base_url.format(formatted_role)
-                
-                    logger.info(f"Scraping Bayt for role: {role} - URL: {url}")
-                
-                    try:
-                        self.driver.get(url)
-                        
-                        # Wait for page to load completely
-                        WebDriverWait(self.driver, 10).until(
-                            EC.presence_of_element_located((By.TAG_NAME, "body"))
-                        )
-                        
-                        # Additional wait for dynamic content
-                        time.sleep(random.uniform(3, 7))
-                        
-                        # Log page title to verify page loaded
-                        page_title = self.driver.title
-                        logger.info(f"Page loaded: {page_title}")
-                        
-                        # Find job cards using the correct selector
-                        job_cards = self.driver.find_elements(By.CSS_SELECTOR, ".has-pointer-d")
-                        logger.info(f"Found {len(job_cards)} job cards")
-                        
-                        if not job_cards:
-                            logger.warning(f"No job cards found for role: {role}")
-                            continue
-                        
-                        # Process job cards
-                        for i, card in enumerate(job_cards):
+                formatted_role = role.replace(' ', '-').lower()
+                url = base_url.format(formatted_role)
+            
+                logger.info(f"Scraping Bayt for role: {role} - URL: {url}")
+            
+                try:
+                    self.driver.get(url)
+                    
+                    # Wait for page to load completely
+                    WebDriverWait(self.driver, 10).until(
+                        EC.presence_of_element_located((By.TAG_NAME, "body"))
+                    )
+                    
+                    # Additional wait for dynamic content
+                    time.sleep(random.uniform(3, 7))
+                    
+                    # Log page title to verify page loaded
+                    page_title = self.driver.title
+                    logger.info(f"Page loaded: {page_title}")
+                    
+                    # Find job cards using the correct selector
+                    job_cards = self.driver.find_elements(By.CSS_SELECTOR, ".has-pointer-d")
+                    logger.info(f"Found {len(job_cards)} job cards")
+                    
+                    if not job_cards:
+                        logger.warning(f"No job cards found for role: {role}")
+                        continue
+                    
+                    # Process job cards
+                    for i, card in enumerate(job_cards):
+                        try:
+                            logger.info(f"Processing job card {i+1}/{len(job_cards)}")
+                            
+                            # Extract job title and link from h2 > a
+                            job_title = None
+                            job_link = None
                             try:
-                                logger.info(f"Processing job card {i+1}/{len(job_cards)}")
-                                
-                                # Extract job title and link from h2 > a
-                                job_title = None
-                                job_link = None
+                                title_elem = card.find_element(By.CSS_SELECTOR, "h2 a")
+                                job_title = title_elem.text.strip()
+                                job_link = title_elem.get_attribute("href")
+                                if job_link:
+                                    job_link = job_link.split('?')[0]
+                            except Exception as e:
+                                logger.warning(f"Could not extract job title from card {i+1}: {e}")
+                                continue
+                            
+                            # Extract company name from the company link
+                            company_name = None
+                            try:
+                                # Strategy 1: Look for a.t-default.t-bold (original selector)
+                                company_elem = card.find_element(By.CSS_SELECTOR, "a.t-default.t-bold")
+                                company_name = company_elem.text.strip()
+                                logger.info(f"Found company name using a.t-default.t-bold: {company_name}")
+                            except Exception as e:
+                                logger.warning(f"Strategy 1 failed for card {i+1}: {e}")
                                 try:
-                                    title_elem = card.find_element(By.CSS_SELECTOR, "h2 a")
-                                    job_title = title_elem.text.strip()
-                                    job_link = title_elem.get_attribute("href")
-                                    if job_link:
-                                        job_link = job_link.split('?')[0]
-                                except Exception as e:
-                                    logger.warning(f"Could not extract job title from card {i+1}: {e}")
-                                    continue
-                                
-                                # Extract company name from the company link
-                                company_name = None
-                                try:
-                                    # Strategy 1: Look for a.t-default.t-bold (original selector)
-                                    company_elem = card.find_element(By.CSS_SELECTOR, "a.t-default.t-bold")
+                                    # Strategy 2: Look for <b> tag in the job-company-location-wrapper
+                                    company_elem = card.find_element(By.CSS_SELECTOR, ".job-company-location-wrapper b")
                                     company_name = company_elem.text.strip()
-                                    logger.info(f"Found company name using a.t-default.t-bold: {company_name}")
+                                    logger.info(f"Found company name using <b> tag: {company_name}")
                                 except Exception as e:
-                                    logger.warning(f"Strategy 1 failed for card {i+1}: {e}")
+                                    logger.warning(f"Strategy 2 failed for card {i+1}: {e}")
+                                    
+                                    # Strategy 3: Look for any bold text that might be company name
                                     try:
-                                        # Strategy 2: Look for <b> tag in the job-company-location-wrapper
-                                        company_elem = card.find_element(By.CSS_SELECTOR, ".job-company-location-wrapper b")
-                                        company_name = company_elem.text.strip()
-                                        logger.info(f"Found company name using <b> tag: {company_name}")
+                                        bold_elems = card.find_elements(By.CSS_SELECTOR, "b, .t-bold")
+                                        for elem in bold_elems:
+                                            text = elem.text.strip()
+                                            if (text and text != job_title and 
+                                                'Easy Apply' not in text and 
+                                                'Saudi nationals' not in text and
+                                                'Mid career' not in text and
+                                                'Senior' not in text and
+                                                'Entry level' not in text):
+                                                company_name = text
+                                                logger.info(f"Found company name using fallback bold text: {company_name}")
+                                                break
                                     except Exception as e:
-                                        logger.warning(f"Strategy 2 failed for card {i+1}: {e}")
+                                        logger.warning(f"Strategy 3 failed for card {i+1}: {e}")
                                         
-                                        # Strategy 3: Look for any bold text that might be company name
+                                        # Strategy 4: Parse from card text structure
                                         try:
-                                            bold_elems = card.find_elements(By.CSS_SELECTOR, "b, .t-bold")
-                                            for elem in bold_elems:
-                                                text = elem.text.strip()
-                                                if (text and text != job_title and 
-                                                    'Easy Apply' not in text and 
-                                                    'Saudi nationals' not in text and
-                                                    'Mid career' not in text and
-                                                    'Senior' not in text and
-                                                    'Entry level' not in text):
-                                                    company_name = text
-                                                    logger.info(f"Found company name using fallback bold text: {company_name}")
+                                            card_text = card.text
+                                            lines = card_text.split('\n')
+                                            # Look for company name in the lines after job title
+                                            for line in lines[1:]:
+                                                line = line.strip()
+                                                if (line and line != job_title and 
+                                                    not line.startswith('$') and 
+                                                    not line.startswith('Yesterday') and 
+                                                    not line.startswith('days ago') and 
+                                                    'career' not in line.lower() and
+                                                    'Easy Apply' not in line and
+                                                    'Saudi nationals' not in line and
+                                                    'Saudi Arabia' not in line and
+                                                    not line.startswith('Seeking')):
+                                                    company_name = line
+                                                    logger.info(f"Found company name using text parsing: {company_name}")
                                                     break
                                         except Exception as e:
-                                            logger.warning(f"Strategy 3 failed for card {i+1}: {e}")
-                                            
-                                            # Strategy 4: Parse from card text structure
-                                            try:
-                                                card_text = card.text
-                                                lines = card_text.split('\n')
-                                                # Look for company name in the lines after job title
-                                                for line in lines[1:]:
-                                                    line = line.strip()
-                                                    if (line and line != job_title and 
-                                                        not line.startswith('$') and 
-                                                        not line.startswith('Yesterday') and 
-                                                        not line.startswith('days ago') and 
-                                                        'career' not in line.lower() and
-                                                        'Easy Apply' not in line and
-                                                        'Saudi nationals' not in line and
-                                                        'Saudi Arabia' not in line and
-                                                        not line.startswith('Seeking')):
-                                                        company_name = line
-                                                        logger.info(f"Found company name using text parsing: {company_name}")
-                                                        break
-                                            except Exception as e:
-                                                logger.warning(f"Strategy 4 failed for card {i+1}: {e}")
+                                            logger.warning(f"Strategy 4 failed for card {i+1}: {e}")
 
-                                # Final validation
-                                if not company_name:
-                                    logger.warning(f"No company name found for card {i+1} - Title: {job_title}")
-                                    company_name = "Unknown Company"
-                                else:
-                                    logger.info(f"Successfully extracted company name: {company_name}")
-                                
-                                # Extract location from the div with class "t-mute t-small"
-                                location = "Saudi Arabia"
-                                try:
-                                    location_elem = card.find_element(By.CSS_SELECTOR, "div.t-mute.t-small")
-                                    location_text = location_elem.text.strip()
-                                    if location_text:
-                                        # Extract the city name (before the ·)
-                                        location_parts = location_text.split('·')
-                                        if len(location_parts) >= 2:
-                                            city = location_parts[0].strip()
-                                            country = location_parts[1].strip()
-                                            location = f"{city}, {country}"
-                                        else:
-                                            location = location_text
-                                except Exception as e:
-                                    logger.warning(f"Could not extract location from card {i+1}: {e}")
-                                
-                                # Extract salary if available
-                                salary_info = None
-                                try:
-                                    salary_elem = card.find_element(By.CSS_SELECTOR, "dt.jb-label-salary")
-                                    salary_text = salary_elem.text.strip()
-                                    if salary_text:
-                                        # Remove the icon and extract just the salary range
-                                        salary_parts = salary_text.split('$')
-                                        if len(salary_parts) > 1:
-                                            salary_info = '$' + '$'.join(salary_parts[1:])
-                                            logger.info(f"Found salary info: {salary_info}")
-                                except Exception:
-                                    pass
-                                
-                                # Extract job description
-                                description = None
-                                try:
-                                    desc_elem = card.find_element(By.CSS_SELECTOR, "div.jb-descr")
-                                    description = desc_elem.text.strip()
-                                except Exception:
-                                    pass
-                                
-                                # Extract career level
-                                career_level = None
-                                try:
-                                    career_elem = card.find_element(By.CSS_SELECTOR, "dt.jb-label-careerlevel")
-                                    career_level = career_elem.text.strip()
-                                    if career_level:
-                                        # Remove the icon text
-                                        career_parts = career_level.split()
-                                        if len(career_parts) >= 2:
-                                            career_level = ' '.join(career_parts[1:])  # Skip the first part (icon)
-                                except Exception:
-                                    pass
-                                
-                                # Extract posted time
-                                posted_time = datetime.now().strftime("%Y-%m-%d")
-                                try:
-                                    date_elem = card.find_element(By.CSS_SELECTOR, "span[data-automation-id='job-active-date']")
-                                    posted_time_text = date_elem.text.strip()
-                                    if posted_time_text:
-                                        # Convert relative time to actual date
-                                        if "Yesterday" in posted_time_text:
-                                            posted_time = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-                                        elif "days ago" in posted_time_text:
-                                            try:
-                                                days = int(posted_time_text.split()[0])
-                                                posted_time = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-                                            except Exception:
-                                                pass
-                                        elif "day ago" in posted_time_text:
-                                            posted_time = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-                                except Exception:
-                                    pass
-                                
-                                # Validate extracted data
-                                if not job_title:
-                                    logger.warning(f"No job title found for card {i+1}")
-                                    continue
-                                
-                                # Apply filters
-                                if not self.is_relevant_role(job_title):
-                                    logger.info(f"Skipping irrelevant role: {job_title}")
-                                    continue
-                                    
-                                if self.is_company_filtered(company_name):
-                                    logger.info(f"Skipping filtered company: {company_name}")
-                                    continue
-                                
-                                # Determine job type
-                                job_type = self.determine_job_type(f"{job_title} {description or ''}")
-                                
-                                # Create job object
-                                job = Job(
-                                    company_name=company_name,
-                                    platform="Bayt",
-                                    job_title=job_title,
-                                    job_type=job_type,
-                                    job_link=job_link,
-                                    posted_time=posted_time,
-                                    location=location
-                                )
-                                
-                                if salary_info:
-                                    job.salary_info = salary_info
-                                if career_level:
-                                    job.career_level = career_level
-                                if description:
-                                    job.description = description
-                                
-                                job_hash = job.get_hash()
-                                if job_hash not in self.seen_jobs:
-                                    jobs.append(job)
-                                    self.seen_jobs.add(job_hash)
-                                    logger.info(f"Successfully extracted job: {job_title} at {company_name}")
-                                else:
-                                    logger.info(f"Duplicate job found: {job_title} at {company_name}")
+                            # Final validation
+                            if not company_name:
+                                logger.warning(f"No company name found for card {i+1} - Title: {job_title}")
+                                company_name = "Unknown Company"
+                            else:
+                                logger.info(f"Successfully extracted company name: {company_name}")
                             
+                            # Extract location from the div with class "t-mute t-small"
+                            location = "Saudi Arabia"
+                            try:
+                                location_elem = card.find_element(By.CSS_SELECTOR, "div.t-mute.t-small")
+                                location_text = location_elem.text.strip()
+                                if location_text:
+                                    # Extract the city name (before the ·)
+                                    location_parts = location_text.split('·')
+                                    if len(location_parts) >= 2:
+                                        city = location_parts[0].strip()
+                                        country = location_parts[1].strip()
+                                        location = f"{city}, {country}"
+                                    else:
+                                        location = location_text
                             except Exception as e:
-                                logger.warning(f"Error extracting job card {i+1}: {e}")
+                                logger.warning(f"Could not extract location from card {i+1}: {e}")
+                            
+                            # Extract salary if available
+                            salary_info = None
+                            try:
+                                salary_elem = card.find_element(By.CSS_SELECTOR, "dt.jb-label-salary")
+                                salary_text = salary_elem.text.strip()
+                                if salary_text:
+                                    # Remove the icon and extract just the salary range
+                                    salary_parts = salary_text.split('$')
+                                    if len(salary_parts) > 1:
+                                        salary_info = '$' + '$'.join(salary_parts[1:])
+                                        logger.info(f"Found salary info: {salary_info}")
+                            except Exception:
+                                pass
+                            
+                            # Extract job description
+                            description = None
+                            try:
+                                desc_elem = card.find_element(By.CSS_SELECTOR, "div.jb-descr")
+                                description = desc_elem.text.strip()
+                            except Exception:
+                                pass
+                            
+                            # Extract career level
+                            career_level = None
+                            try:
+                                career_elem = card.find_element(By.CSS_SELECTOR, "dt.jb-label-careerlevel")
+                                career_level = career_elem.text.strip()
+                                if career_level:
+                                    # Remove the icon text
+                                    career_parts = career_level.split()
+                                    if len(career_parts) >= 2:
+                                        career_level = ' '.join(career_parts[1:])  # Skip the first part (icon)
+                            except Exception:
+                                pass
+                            
+                            # Extract posted time
+                            posted_time = datetime.now().strftime("%Y-%m-%d")
+                            try:
+                                date_elem = card.find_element(By.CSS_SELECTOR, "span[data-automation-id='job-active-date']")
+                                posted_time_text = date_elem.text.strip()
+                                if posted_time_text:
+                                    # Convert relative time to actual date
+                                    if "Yesterday" in posted_time_text:
+                                        posted_time = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+                                    elif "days ago" in posted_time_text:
+                                        try:
+                                            days = int(posted_time_text.split()[0])
+                                            posted_time = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+                                        except Exception:
+                                            pass
+                                    elif "day ago" in posted_time_text:
+                                        posted_time = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+                            except Exception:
+                                pass
+                            
+                            # Validate extracted data
+                            if not job_title:
+                                logger.warning(f"No job title found for card {i+1}")
                                 continue
+                            
+                            # Apply filters
+                            if not self.is_relevant_role(job_title):
+                                logger.info(f"Skipping irrelevant role: {job_title}")
+                                continue
+                                
+                            if self.is_company_filtered(company_name):
+                                logger.info(f"Skipping filtered company: {company_name}")
+                                continue
+                            
+                            # Determine job type
+                            job_type = self.determine_job_type(f"{job_title} {description or ''}")
+                            
+                            # Create job object
+                            job = Job(
+                                company_name=company_name,
+                                platform="Bayt",
+                                job_title=job_title,
+                                job_type=job_type,
+                                job_link=job_link,
+                                posted_time=posted_time,
+                                location=location
+                            )
+                            
+                            if salary_info:
+                                job.salary_info = salary_info
+                            if career_level:
+                                job.career_level = career_level
+                            if description:
+                                job.description = description
+                            
+                            job_hash = job.get_hash()
+                            if job_hash not in self.seen_jobs:
+                                jobs.append(job)
+                                self.seen_jobs.add(job_hash)
+                                logger.info(f"Successfully extracted job: {job_title} at {company_name}")
+                            else:
+                                logger.info(f"Duplicate job found: {job_title} at {company_name}")
                         
-                        # Add delay between requests
-                        time.sleep(self.config.get('scraping', {}).get('delay_between_requests', 2))
-                        
-                    except TimeoutException:
-                        logger.error(f"Timeout loading page for role: {role}")
-                        continue
-                    except Exception as e:
-                        logger.error(f"Error scraping role {role}: {e}")
-                        continue
-        
+                        except Exception as e:
+                            logger.warning(f"Error extracting job card {i+1}: {e}")
+                            continue
+                    
+                    # Add delay between requests
+                    time.sleep(self.config.get('scraping', {}).get('delay_between_requests', 2))
+                    
+                except TimeoutException:
+                    logger.error(f"Timeout loading page for role: {role}")
+                    continue
+                except Exception as e:
+                    logger.error(f"Error scraping role {role}: {e}")
+                    continue
+    
         except Exception as e:
             logger.error(f"Bayt scraping failed: {e}")
         
