@@ -798,6 +798,48 @@ class JobScraper:
         logger.info(f"Bayt scraping completed. Found {len(jobs)} jobs.")
         return jobs
     
+    def log_script_run(self, total_jobs: int, linkedin_jobs: int, indeed_jobs: int, 
+                    bayt_jobs: int, remote_jobs: int, hybrid_jobs: int, 
+                    run_duration: float, status: str):
+        """Log script run statistics to Airtable script runs table"""
+        try:
+            # Use the script runs table ID from the documentation
+            script_runs_url = f"https://api.airtable.com/v0/{self.base_id}/tblQBPzbNfX4TG0S6"
+            
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            # Prepare the record data
+            record = {
+                "fields": {
+                    "Date": datetime.now().strftime("%Y-%m-%d"),  # ISO 8601 date format
+                    # Add these new fields to your Airtable table:
+                    "Total Jobs Count": total_jobs,
+                    "LinkedIn Jobs": linkedin_jobs,
+                    "Indeed Jobs": indeed_jobs,
+                    "Bayt Jobs": bayt_jobs,
+                    "Remote Jobs": remote_jobs,
+                    "Hybrid Jobs": hybrid_jobs,
+                    "Run Duration": run_duration,
+                    "Status": status,
+                    "Run Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+            }
+            
+            payload = {"records": [record]}
+            
+            response = requests.post(script_runs_url, headers=headers, data=json.dumps(payload))
+            
+            if response.status_code == 200:
+                logger.info(f"Successfully logged script run to Airtable: {total_jobs} jobs found")
+            else:
+                logger.error(f"Failed to log script run: {response.status_code}, {response.text}")
+                
+        except Exception as e:
+            logger.error(f"Error while logging script run: {e}")
+
     def save_to_airtable(self, jobs: List[Job]):
         """Save jobs to Airtable in batches"""
         try:
@@ -852,6 +894,7 @@ class JobScraper:
    
     def run_scraper(self):
         """Main scraper execution"""
+        start_time = time.time()
         logger.info("Starting job scraper for Saudi Arabia...")
         
         try:
@@ -869,7 +912,7 @@ class JobScraper:
             # indeed_jobs = self.scrape_indeed()
             # all_jobs.extend(indeed_jobs)
             
-            # # Bayt
+            # Bayt
             bayt_jobs = self.scrape_bayt()
             all_jobs.extend(bayt_jobs)
             
@@ -878,40 +921,67 @@ class JobScraper:
             # seen_hashes = set()
             
             for job in all_jobs:
-                job_hash = job.get_hash()
+                # job_hash = job.get_hash()
                 # if job_hash not in seen_hashes:
                 unique_jobs.append(job)
                 # seen_hashes.add(job_hash)
             
             logger.info(f"Found {len(unique_jobs)} unique jobs after deduplication")
             
-            # # Save to Google Sheets
-            # if unique_jobs:
-            #     self.save_to_google_sheets(unique_jobs)
-            
             if unique_jobs:
                self.save_to_airtable(unique_jobs)  # Added Airtable save call here
  
-            # # Send Slack notification
-            # self.send_slack_notification(len(unique_jobs), unique_jobs)
+            # Calculate metrics
+            total_jobs = len(unique_jobs)
+            remote_jobs = len([j for j in unique_jobs if j.job_type == 'Remote'])
+            hybrid_jobs = len([j for j in unique_jobs if j.job_type == 'Hybrid'])
+            linkedin_count = len([j for j in unique_jobs if j.platform == 'LinkedIn'])
+            indeed_count = len([j for j in unique_jobs if j.platform == 'Indeed'])
+            bayt_count = len([j for j in unique_jobs if j.platform == 'Bayt'])
+            run_duration = round(time.time() - start_time, 2)
+            
+            # Log run statistics to script runs table
+            self.log_script_run(
+                total_jobs=total_jobs,
+                linkedin_jobs=linkedin_count,
+                indeed_jobs=indeed_count,
+                bayt_jobs=bayt_count,
+                remote_jobs=remote_jobs,
+                hybrid_jobs=hybrid_jobs,
+                run_duration=run_duration,
+                status="Success"
+            )
             
             # Print summary
             print(f"\n{'='*50}")
             print(f"SCRAPING SUMMARY")
             print(f"{'='*50}")
-            print(f"Total jobs found: {len(unique_jobs)}")
-            print(f"Remote jobs: {len([j for j in unique_jobs if j.job_type == 'Remote'])}")
-            print(f"Hybrid jobs: {len([j for j in unique_jobs if j.job_type == 'Hybrid'])}")
-            print(f"LinkedIn: {len([j for j in unique_jobs if j.platform == 'LinkedIn'])}")
-            print(f"Indeed: {len([j for j in unique_jobs if j.platform == 'Indeed'])}")
-            print(f"Bayt: {len([j for j in unique_jobs if j.platform == 'Bayt'])}")
+            print(f"Total jobs found: {total_jobs}")
+            print(f"Remote jobs: {remote_jobs}")
+            print(f"Hybrid jobs: {hybrid_jobs}")
+            print(f"LinkedIn: {linkedin_count}")
+            print(f"Indeed: {indeed_count}")
+            print(f"Bayt: {bayt_count}")
+            print(f"Run duration: {run_duration}s")
             print(f"{'='*50}")
             
-            # return unique_jobs
-            return []
+            return unique_jobs
             
         except Exception as e:
+            run_duration = round(time.time() - start_time, 2)
             logger.error(f"Scraper execution failed: {e}")
+            
+            # Log failed run
+            self.log_script_run(
+                total_jobs=0,
+                linkedin_jobs=0,
+                indeed_jobs=0,
+                bayt_jobs=0,
+                remote_jobs=0,
+                hybrid_jobs=0,
+                run_duration=run_duration,
+                status="Failed"
+            )
             return []
         
         finally:
