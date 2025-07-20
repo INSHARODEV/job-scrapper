@@ -804,7 +804,9 @@ class JobScraper:
         """Log script run statistics to Airtable script runs table"""
         try:
             # Use the script runs table ID from the documentation
-            script_runs_url = f"https://api.airtable.com/v0/{self.base_id}/tblQBPzbNfX4TG0S6"
+            base_id = self.config['airtable']['base_id']
+            script_runs_url = f"https://api.airtable.com/v0/{base_id}/tblQBPzbNfX4TG0S6"
+            # script_runs_url = f"https://api.airtable.com/v0/appQYuyNlVWHXyG8e/tblQBPzbNfX4TG0S6"
             
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
