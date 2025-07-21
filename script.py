@@ -66,10 +66,9 @@ class JobScraper:
             ]
         }
         self.target_roles = [
-            'graphic designer'
-            # , 'full stack developer','ui-ux designer', 
-            # 'motion graphic designer', 'frontend developer', 'backend developer',
-            # 'web developer', 'mobile developer', 'react developer', 'angular developer',"مصمم جرافيك"
+            'graphic designer', 'full stack developer','ui-ux designer', 
+            'motion graphic designer', 'frontend developer', 'backend developer',
+            'web developer', 'mobile developer', 'react developer', 'angular developer',"مصمم جرافيك"
         ]
    
     def load_config(self, config_file: str) -> Dict:
