@@ -66,9 +66,10 @@ class JobScraper:
             ]
         }
         self.target_roles = [
-            'graphic designer', 'full stack developer','ui-ux designer', 
-            'motion graphic designer', 'frontend developer', 'backend developer',
-            'web developer', 'mobile developer', 'react developer', 'angular developer',"مصمم جرافيك"
+            'graphic designer'
+            # , 'full stack developer','ui-ux designer', 
+            # 'motion graphic designer', 'frontend developer', 'backend developer',
+            # 'web developer', 'mobile developer', 'react developer', 'angular developer',"مصمم جرافيك"
         ]
    
     def load_config(self, config_file: str) -> Dict:
@@ -798,9 +799,9 @@ class JobScraper:
         logger.info(f"Bayt scraping completed. Found {len(jobs)} jobs.")
         return jobs
     
-    def log_script_run(self, total_jobs: int, linkedin_jobs: int, indeed_jobs: int, 
-                    bayt_jobs: int, remote_jobs: int, hybrid_jobs: int, 
-                    run_duration: float, status: str):
+    def log_script_run(self, total_jobs: int, linkedin_jobs: int, indeed_jobs: int,
+                       bayt_jobs: int, remote_jobs: int, hybrid_jobs: int,
+                       run_duration: float, status: str):
         """Log script run statistics to Airtable script runs table"""
         try:
             # Use the script runs table ID from the documentation
@@ -813,20 +814,19 @@ class JobScraper:
                 "Content-Type": "application/json"
             }
             
-            # Prepare the record data
+            # Prepare the record data using field IDs (more reliable than field names)
             record = {
                 "fields": {
-                    "Date": datetime.now().strftime("%Y-%m-%d"),  # ISO 8601 date format
-                    # Add these new fields to your Airtable table:
-                    "Total Jobs Count": total_jobs,
-                    "LinkedIn Jobs": linkedin_jobs,
-                    "Indeed Jobs": indeed_jobs,
-                    "Bayt Jobs": bayt_jobs,
-                    "Remote Jobs": remote_jobs,
-                    "Hybrid Jobs": hybrid_jobs,
-                    "Run Duration": run_duration,
-                    "Status": status,
-                    "Run Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    "fldqwll19wwdBpG3M": datetime.now().strftime("%Y-%m-%d"),  # Date field
+                    "fld75Ml6lRzi83Iod": total_jobs,                            # Total Jobs Count
+                    "fldx5CO059lbEnKIf": linkedin_jobs,                         # LinkedIn Jobs
+                    "fld7YAtf2jthC36fY": indeed_jobs,                           # Indeed Jobs
+                    "fldogbkGvR3MEFNgC": bayt_jobs,                             # Bayt Jobs
+                    "fldTnA12tUjiIUPdn": remote_jobs,                           # Remote Jobs
+                    "fldN1l14XK5oY6Go9": hybrid_jobs,                           # Hybrid Jobs
+                    "fldaC8LvSCjqvXCrI": run_duration,                          # Run Duration
+                    "fldmNEzhSN25NkC1O": status,                                # Status
+                    # Note: Run Timestamp is not in the documented fields, so we'll skip it
                 }
             }
             
@@ -836,11 +836,14 @@ class JobScraper:
             
             if response.status_code == 200:
                 logger.info(f"Successfully logged script run to Airtable: {total_jobs} jobs found")
+                return True
             else:
                 logger.error(f"Failed to log script run: {response.status_code}, {response.text}")
+                return False
                 
         except Exception as e:
             logger.error(f"Error while logging script run: {e}")
+            return False
 
     def save_to_airtable(self, jobs: List[Job]):
         """Save jobs to Airtable in batches"""
