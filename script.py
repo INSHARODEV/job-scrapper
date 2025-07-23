@@ -47,9 +47,27 @@ class JobScraper:
         self.config = self.load_config(config_file)
         self.driver = None
         self.seen_jobs: Set[str] = set()
-        self.api_url = f"https://api.airtable.com/v0/{self.config['airtable']['base_id']}/{self.config['airtable']['table_name']}"
-        self.api_key = self.config['airtable']['api_key']
-        self.api_key_2captcha = self.config.get('2captcha_api_key', '1845ec03c08162fbd7cd236c6fb3f0e4') 
+        
+        # Prioritize environment variables over config file
+        self.api_key = os.getenv('AIRTABLE_API_KEY')
+        self.base_id = os.getenv('AIRTABLE_BASE_ID') 
+        self.table_name = os.getenv('AIRTABLE_TABLE_NAME', 'Jobs')
+        self.script_runs_table_id = os.getenv('AIRTABLE_SCRIPT_RUNS_TABLE_ID')
+        
+        # Only fall back to config if env vars are not set
+        if not self.api_key:
+            self.api_key = self.config.get('airtable', {}).get('api_key')
+        if not self.base_id:
+            self.base_id = self.config.get('airtable', {}).get('base_id')
+        if not self.script_runs_table_id:
+            self.script_runs_table_id = self.config.get('airtable', {}).get('script_runs_table_id')
+        
+        # Validate required credentials
+        if not all([self.api_key, self.base_id]):
+            raise ValueError("Missing required Airtable credentials. Please set AIRTABLE_API_KEY and AIRTABLE_BASE_ID environment variables")
+        
+        self.api_url = f"https://api.airtable.com/v0/{self.base_id}/{self.table_name}"
+        
         self.filtered_companies = {
             'large_companies': [
                 'google', 'microsoft', 'amazon', 'apple', 'meta', 'netflix', 'tesla',
@@ -77,10 +95,14 @@ class JobScraper:
             with open(config_file, 'r') as f:
                 return json.load(f)
         except FileNotFoundError:
-            logger.error(f"Config file {config_file} not found. Creating template...")
-            self.create_config_template(config_file)
+            # Only create template for local development, not in GitHub Actions
+            if not os.getenv('GITHUB_ACTIONS'):
+                logger.error(f"Config file {config_file} not found. Creating template...")
+                self.create_config_template(config_file)
+            else:
+                logger.error(f"Config file {config_file} not found in GitHub Actions!")
             return {}
-    
+        
     def create_config_template(self, config_file: str):
         """Create a template configuration file"""
         template = {
@@ -90,9 +112,10 @@ class JobScraper:
                 "worksheet_name": "Jobs"
             },
             "airtable": {
-                "api_key": "patvpoYzr3vTKl9CC.6053c7a61aaf1639426cac8f5cef58a821dcd8553291e93f0a4f41698dce8fdb",
-                "base_id": "appQYuyNlVWHXyG8e",
-                "table_name": "Jobs"
+                "api_key": "your_airtable_api_key_here",
+                "base_id": "your_airtable_base_id_here",
+                "table_name": "Jobs",
+                "script_runs_table_id": "your_script_runs_table_id_here"
             },
             "slack": {
                 "webhook_url": "your_slack_webhook_url"
@@ -101,7 +124,7 @@ class JobScraper:
                 "headless": True,
                 "delay_between_requests": 1,
                 "max_pages_per_site": 20
-            }
+            },
         }
         with open(config_file, 'w') as f:
             json.dump(template, f, indent=2)
@@ -805,8 +828,7 @@ class JobScraper:
         try:
             # Use the script runs table ID from the documentation
             base_id = self.config['airtable']['base_id']
-            script_runs_url = f"https://api.airtable.com/v0/{base_id}/tblQBPzbNfX4TG0S6"
-            # script_runs_url = f"https://api.airtable.com/v0/appQYuyNlVWHXyG8e/tblQBPzbNfX4TG0S6"
+            script_runs_url = f"https://api.airtable.com/v0/{base_id}/{self.script_runs_table_id}"
             
             headers = {
                 "Authorization": f"Bearer {self.api_key}",

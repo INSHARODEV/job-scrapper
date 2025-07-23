@@ -42,14 +42,6 @@ jobs:
         run: |
           cat > config.json << EOF
           {
-            "airtable": {
-              "api_key": "${{ secrets.AIRTABLE_API_KEY }}",
-              "base_id": "${{ secrets.AIRTABLE_BASE_ID }}",
-              "table_name": "Jobs"
-            },
-            "slack": {
-              "webhook_url": "${{ secrets.SLACK_WEBHOOK_URL }}"
-            },
             "scraping": {
               "headless": true,
               "delay_between_requests": 2,
@@ -63,6 +55,10 @@ jobs:
           python script.py
         env:
           DISPLAY: :99.0
+          AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_API_KEY }}
+          AIRTABLE_BASE_ID: ${{ secrets.AIRTABLE_BASE_ID }}
+          AIRTABLE_TABLE_NAME: ${{ secrets.AIRTABLE_TABLE_NAME }}
+          AIRTABLE_SCRIPT_RUNS_TABLE_ID: ${{ secrets.AIRTABLE_RUNS_TABLE_ID }}
 
       - name: Upload logs (on failure)
         if: failure()
